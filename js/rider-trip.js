@@ -47,9 +47,16 @@
     const list=dialog.querySelector('[data-live-jobs]');
     const info=dialog.querySelector('[data-live-info]');
     const footer=dialog.querySelector('[data-trip-controls]');
-    const map=window.PapalitaRiderTripMap.create(dialog.querySelector('[data-trip-map]'),dialog.querySelector('[data-trip-map-note]'));
     let order=assignedOrder, painted='', share=null, refreshing=false, busy=false, loaded=false;
-    let form='', photo='', photoLoading=false, revision=0, mutation=0, gpsWatch, reportId;
+    let form='', photo='', photoLoading=false, revision=0, mutation=0, gpsWatch, locate, reportId;
+    function stopLocalGps() {
+      if(gpsWatch!=null)navigator.geolocation.clearWatch(gpsWatch);
+      gpsWatch=null;
+    }
+    const map=window.PapalitaRiderTripMap.create(dialog.querySelector('[data-trip-map]'),dialog.querySelector('[data-trip-map-note]'),()=>{
+      stopLocalGps();
+      if(locate)locate.hidden=true;
+    });
     const alive=()=>dialog.open && dialog.isConnected && isCurrent();
     const tell=message=>{info.textContent=message;info.hidden=!message;};
     const rpc=async(name,args)=>{
@@ -242,7 +249,7 @@
       if((form==='pickup-photo'||form==='proof')&&photo)void send(form==='proof'?'proof':'pickup_photo',{p_photo:photo},'Photo saved.');
       if(form==='finish')void send('deliver',{p_cash_confirmed:values.has('cash')},'Delivery completed.');
     });
-    const leaving=()=>{if(gpsWatch!=null)navigator.geolocation.clearWatch(gpsWatch);gpsWatch=null;void stopShare();};
+    const leaving=()=>{stopLocalGps();void stopShare();};
     const visibility=()=>{
       if(!alive())return;
       if(document.hidden){map.gps();if(share)tell('GPS paused while Papalita is in the background.');return;}
@@ -250,14 +257,16 @@
       void refresh();
     };
     if (window.isSecureContext && navigator.geolocation) {
-      // This location stays on the phone until the rider explicitly starts sharing.
-      const locate=document.createElement('button');
+      // Display location on the rider map. Sharing with the customer is a separate action.
+      locate=document.createElement('button');
       locate.type='button';locate.className='btn s sm pr-trip-locate';locate.textContent='My location';
+      locate.hidden=true;
+      void map.ready.then(ready=>{if(alive())locate.hidden=!ready;});
       locate.onclick=()=>{
         if(gpsWatch!=null)return;
         gpsWatch=navigator.geolocation.watchPosition(({coords})=>{
           if(alive()&&!document.hidden)map.gps(coords.latitude,coords.longitude);
-        },()=>{if(gpsWatch!=null)navigator.geolocation.clearWatch(gpsWatch);gpsWatch=null;tell('Your position is unavailable. Check GPS permissions.');},{enableHighAccuracy:true,timeout:10000});
+        },()=>{stopLocalGps();tell('Your position is unavailable. Check GPS permissions.');},{enableHighAccuracy:true,timeout:10000});
       };
       dialog.querySelector('[data-trip-map]').before(locate);
     }
@@ -266,7 +275,7 @@
     const poll=setInterval(refresh,5000);
     dialog.addEventListener('close',()=>{
       clearInterval(poll);
-      if(gpsWatch!=null)navigator.geolocation.clearWatch(gpsWatch);
+      stopLocalGps();
       map.close();
       document.removeEventListener('visibilitychange',visibility);
       window.removeEventListener('pagehide',leaving);

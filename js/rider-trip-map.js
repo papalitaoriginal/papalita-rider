@@ -19,88 +19,88 @@
       <path d="M32 25l8 4 7-2" fill="none"/>
       <circle cx="35" cy="18" r="8" fill="#18a653"/><path d="M35 17h9l-2 5h-5" fill="#d5f7ee"/>
     </g></svg>`;
-  const point = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) &&
-    Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? [lat, lng] : null;
+  const {create:googleMap,point}=window.PapalitaRiderGoogleMap;
 
-  function create(container, note) {
-    let L, map, resize, closed = false, selection, position, previousPosition, rider, stops, motion;
+  function create(container,note,onUnavailable) {
+    const stops=[];
+    let available=false, selection, position, previousPosition, rider, motion;
     const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
-    let requestedFit = true, tilesFailed = false, mapFailed = false, paintedStops = '';
+    let requestedFit=true,mapError='',paintedStops='';
+    const map=googleMap(container,message=>{
+      available=false;
+      cancelAnimationFrame(motion);
+      mapError=message;
+      updateNote();
+      onUnavailable?.();
+    });
     function updateNote() {
       const {pickup, drop, phase} = selection || {};
-      note.textContent = mapFailed ? 'Street map is unavailable.' :
-        tilesFailed ? 'Street tiles could not load.' :
-        !selection ? '' :
+      note.textContent = mapError || (!selection ? '' :
         phase==='dispatch' ? [!pickup?'Pickup pin unavailable.':'',drop?'Drop-off pin marks the general area.':'Drop-off shown by area name.'].filter(Boolean).join(' ') :
         !pickup && !drop ? 'Waiting for pickup and drop-off pins.' :
-        !pickup ? 'Pickup pin unavailable.' : !drop ? 'Drop-off pin unavailable.' : '';
+        !pickup ? 'Pickup pin unavailable.' : !drop ? 'Drop-off pin unavailable.' : '');
       note.hidden = !note.textContent;
     }
     function paint() {
-      if (!map) return;
+      if(!available)return;
       const {pickup, drop, phase} = selection || {};
       const stopKey = JSON.stringify([pickup, drop, phase]);
       if (stopKey !== paintedStops) {
         paintedStops = stopKey;
-        stops.clearLayers();
+        stops.splice(0).forEach(marker=>map.removeMarker(marker));
         for (const [coords, label, mark, color] of [
           [pickup, 'Pickup', 'P', 'pickup'], [drop, phase==='dispatch'?'Drop-off area':'Drop-off', 'D', 'drop']
         ]) {
           if (!coords) continue;
-          const icon = L.divIcon({
-            className:'pr-trip-marker', html:'<b class="' + color + '">' + mark + '</b>',
-            iconSize:[30,30], iconAnchor:[15,15]
-          });
-          L.marker(coords,{icon,title:label}).addTo(stops).bindTooltip(label,{direction:'top'});
+          const icon=document.createElement('div');
+          icon.className='pr-trip-marker';
+          const badge=document.createElement('b');
+          badge.className=color;
+          badge.textContent=mark;
+          icon.append(badge);
+          stops.push(map.addMarker(coords,label,icon));
         }
       }
       if (position) {
         if (rider && position !== previousPosition) {
           cancelAnimationFrame(motion);
-          if(reduced.matches)rider.setLatLng(position);
+          if(reduced.matches)rider.position=position;
           else {
-            const from=rider.getLatLng(), to=position, start=performance.now();
+            const from=previousPosition, to=position, start=performance.now();
             const animate=now=>{
               const f=Math.min(1,(now-start)/550);
-              rider.setLatLng([from.lat+(to[0]-from.lat)*f,from.lng+(to[1]-from.lng)*f]);
+              rider.position={lat:from.lat+(to.lat-from.lat)*f,lng:from.lng+(to.lng-from.lng)*f};
               if(f<1)motion=requestAnimationFrame(animate);
             };
             motion=requestAnimationFrame(animate);
           }
         }
-        else if (!rider) rider = L.marker(position,{zIndexOffset:500,title:'Your location',icon:L.divIcon({
-          className:'pr-trip-marker',html:riderIcon,iconSize:[48,48],iconAnchor:[24,39]
-        })}).addTo(map);
-      } else if (rider) { cancelAnimationFrame(motion); rider.remove(); rider = null; }
+        else if (!rider) {
+          const icon=document.createElement('div');
+          icon.className='pr-trip-marker';
+          icon.innerHTML=riderIcon;
+          rider=map.addMarker(position,'Your location',icon,{zIndex:500,anchorTop:'-81%'});
+        }
+      } else if(rider){
+        cancelAnimationFrame(motion);
+        map.removeMarker(rider);
+        rider=null;
+      }
       previousPosition=position;
 
       if (requestedFit) {
         const target = ['transit','arrived'].includes(phase) ? drop : pickup;
         const places = (target && position && phase !== 'offer' ? [position,target] : [pickup,drop,position]).filter(Boolean);
-        if (places.length > 1) map.fitBounds(places,{maxZoom:16,padding:[42,42],animate:false});
-        else if (places.length) map.setView(places[0],16,{animate:false});
+        map.fit(places,42);
         requestedFit = !places.length;
       }
     }
-    window.PapalitaRiderMap.leaflet().then(api => {
-      if (closed) return;
-      L = api;
-      map = L.map(container,{zoomControl:false}).setView([9.4671,125.5744],14);
-      stops = L.layerGroup().addTo(map);
-      L.control.zoom({position:'topright'}).addTo(map);
-      L.tileLayer(window.FOODIE_CONFIG?.maps?.riderTiles || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
-        maxZoom:19, className:'pr-trip-street-tiles',
-        attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      }).on('tileerror',()=>{tilesFailed=true;updateNote();}).on('tileload',()=>{
-        if(tilesFailed){tilesFailed=false;updateNote();}
-      }).addTo(map);
-      if (typeof ResizeObserver === 'function') {
-        resize = new ResizeObserver(()=>map.invalidateSize({pan:false}));
-        resize.observe(container);
-      }
+    map.ready.then(ready=>{
+      available=ready;
       paint();
-    }).catch(()=>{if(!closed){mapFailed=true;updateNote();}});
+    });
     return {
+      ready:map.ready,
       show(order,phase) {
         const next = order ? {
           id:order.id, phase,
@@ -118,7 +118,7 @@
         position=next;
         paint();
       },
-      close(){closed=true;cancelAnimationFrame(motion);resize?.disconnect();map?.remove();}
+      close(){available=false;cancelAnimationFrame(motion);map.close();}
     };
   }
   window.PapalitaRiderTripMap={create};
