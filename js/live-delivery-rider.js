@@ -249,7 +249,7 @@
           <button type="button" class="btn p" data-map-route disabled>Show road route</button>
           ${url?`<a class="btn s" href="${escape(url)}" target="_blank" rel="noopener noreferrer">Directions to ${pickedUp?'customer':'store'}</a>`:''}
         </div>
-        <p class="pr-map-disclosure">Show road route sends the start and destination coordinates to the routing provider. Road routing uses <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap data</a>.</p>`);
+        <p class="pr-map-disclosure">Show road route sends the start and destination coordinates to the routing provider.</p>`);
       mapDialog={dialog,id:order.id,version:order.assignment_version,pickedUp};
       dialog.addEventListener('close',()=>{if(mapDialog?.dialog===dialog)mapDialog=null;},{once:true});
       if(window.PapalitaRiderMap)window.PapalitaRiderMap.mount(dialog,order,pickedUp);

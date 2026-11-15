@@ -19,88 +19,84 @@
       <path d="M32 25l8 4 7-2" fill="none"/>
       <circle cx="35" cy="18" r="8" fill="#18a653"/><path d="M35 17h9l-2 5h-5" fill="#d5f7ee"/>
     </g></svg>`;
-  const {create:googleMap,point}=window.PapalitaRiderGoogleMap;
+  const {create:openMap,fit,point}=window.PapalitaRiderMap;
 
-  function create(container,note,onUnavailable) {
+  function create(container, note) {
     const stops=[];
-    let available=false, selection, position, previousPosition, rider, motion;
+    let api,map,closed=false,selection,position,previousPosition,rider,motion;
     const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
-    let requestedFit=true,mapError='',paintedStops='';
-    const map=googleMap(container,message=>{
-      available=false;
-      cancelAnimationFrame(motion);
-      mapError=message;
+    let requestedFit=true,mapNotice='',paintedStops='';
+    const renderer=openMap(container,message=>{
+      mapNotice=message;
       updateNote();
-      onUnavailable?.();
     });
     function updateNote() {
       const {pickup, drop, phase} = selection || {};
-      note.textContent = mapError || (!selection ? '' :
+      note.textContent = mapNotice || (!selection ? '' :
         phase==='dispatch' ? [!pickup?'Pickup pin unavailable.':'',drop?'Drop-off pin marks the general area.':'Drop-off shown by area name.'].filter(Boolean).join(' ') :
         !pickup && !drop ? 'Waiting for pickup and drop-off pins.' :
         !pickup ? 'Pickup pin unavailable.' : !drop ? 'Drop-off pin unavailable.' : '');
       note.hidden = !note.textContent;
     }
     function paint() {
-      if(!available)return;
+      if (!map) return;
       const {pickup, drop, phase} = selection || {};
       const stopKey = JSON.stringify([pickup, drop, phase]);
       if (stopKey !== paintedStops) {
         paintedStops = stopKey;
-        stops.splice(0).forEach(marker=>map.removeMarker(marker));
+        stops.splice(0).forEach(marker=>marker.remove());
         for (const [coords, label, mark, color] of [
           [pickup, 'Pickup', 'P', 'pickup'], [drop, phase==='dispatch'?'Drop-off area':'Drop-off', 'D', 'drop']
         ]) {
           if (!coords) continue;
-          const icon=document.createElement('div');
-          icon.className='pr-trip-marker';
+          const element=document.createElement('div');
+          element.className='pr-trip-marker';
+          element.title=label;
           const badge=document.createElement('b');
           badge.className=color;
           badge.textContent=mark;
-          icon.append(badge);
-          stops.push(map.addMarker(coords,label,icon));
+          element.append(badge);
+          stops.push(new api.Marker({element}).setLngLat(coords).addTo(map));
         }
       }
       if (position) {
         if (rider && position !== previousPosition) {
           cancelAnimationFrame(motion);
-          if(reduced.matches)rider.position=position;
+          if(reduced.matches)rider.setLngLat(position);
           else {
-            const from=previousPosition, to=position, start=performance.now();
+            const from=rider.getLngLat(), [lng,lat]=position, start=performance.now();
             const animate=now=>{
               const f=Math.min(1,(now-start)/550);
-              rider.position={lat:from.lat+(to.lat-from.lat)*f,lng:from.lng+(to.lng-from.lng)*f};
+              rider.setLngLat([from.lng+(lng-from.lng)*f,from.lat+(lat-from.lat)*f]);
               if(f<1)motion=requestAnimationFrame(animate);
             };
             motion=requestAnimationFrame(animate);
           }
         }
-        else if (!rider) {
-          const icon=document.createElement('div');
-          icon.className='pr-trip-marker';
-          icon.innerHTML=riderIcon;
-          rider=map.addMarker(position,'Your location',icon,{zIndex:500,anchorTop:'-81%'});
+        else if(!rider){
+          const element=document.createElement('div');
+          element.className='pr-trip-marker pr-trip-rider';
+          element.title='Your location';
+          element.innerHTML=riderIcon;
+          rider=new api.Marker({element,offset:[0,-15]}).setLngLat(position).addTo(map);
         }
-      } else if(rider){
-        cancelAnimationFrame(motion);
-        map.removeMarker(rider);
-        rider=null;
-      }
+      } else if (rider) { cancelAnimationFrame(motion); rider.remove(); rider = null; }
       previousPosition=position;
 
       if (requestedFit) {
         const target = ['transit','arrived'].includes(phase) ? drop : pickup;
         const places = (target && position && phase !== 'offer' ? [position,target] : [pickup,drop,position]).filter(Boolean);
-        map.fit(places,42);
+        fit(map,api,places,42);
         requestedFit = !places.length;
       }
     }
-    map.ready.then(ready=>{
-      available=ready;
+    renderer.ready.then(loaded=>{
+      if(closed||!loaded)return;
+      ({map,api}=loaded);
       paint();
     });
     return {
-      ready:map.ready,
+      ready:renderer.ready,
       show(order,phase) {
         const next = order ? {
           id:order.id, phase,
@@ -118,7 +114,13 @@
         position=next;
         paint();
       },
-      close(){available=false;cancelAnimationFrame(motion);map.close();}
+      close(){
+        closed=true;
+        cancelAnimationFrame(motion);
+        stops.splice(0).forEach(marker=>marker.remove());
+        rider?.remove();
+        renderer.close();
+      }
     };
   }
   window.PapalitaRiderTripMap={create};
