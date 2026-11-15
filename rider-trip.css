@@ -12,8 +12,14 @@
 .pr-trip-panel .pr-trip-gcash-body{display:grid;gap:8px;padding:0 12px 12px}
 .pr-trip-panel .pr-trip-gcash-body p{margin:0;color:#d6e3fa;font-size:13px}
 .pr-trip-panel [data-gcash-status]:empty{display:none}
-.pr-trip-panel .pr-trip-gcash img{box-sizing:border-box;width:min(100%,280px);height:auto;justify-self:center;padding:10px;border-radius:8px;background:white}
-.pr-trip-panel .pr-trip-gcash img[hidden]{display:none}
+.pr-trip-panel .pr-trip-gcash-frame{position:relative;width:min(100%,280px);justify-self:center;border-radius:8px;background:white;overflow:hidden}
+.pr-trip-panel .pr-trip-gcash-frame img{display:block;width:100%;height:auto}
+.pr-trip-panel .pr-trip-gcash-frame.is-focused{aspect-ratio:1}
+/* Show a 400 × 400 region of the original GCash card while preserving its white margin. */
+.pr-trip-panel .pr-trip-gcash-frame.is-focused img{position:absolute;width:195.25%;max-width:none;left:-46.75%;top:-109.25%}
+.pr-trip-panel .pr-trip-gcash [data-gcash-view]{justify-self:center}
+.pr-trip-panel .pr-trip-gcash [hidden]{display:none}
+.pr-trip-panel .pr-trip-gcash-state{margin:12px 0;padding:12px;border-radius:10px;background:#25324a;color:#f1f5ff}
 .pr-trip-panel .pr-trip-info,.pr-trip-panel .pr-trip-map-note{padding:0 16px;margin:10px 0;color:#bfcee6;font-size:13px}
 .pr-trip-panel [data-live-jobs]{padding:0 16px 16px}
 .pr-trip h3,.pr-trip p{overflow-wrap:anywhere}
