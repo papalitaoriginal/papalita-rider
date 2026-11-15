@@ -36,7 +36,9 @@
     const refreshButton=workspace.querySelector('[data-live-refresh]');
     const skipped=new Set();
     const availability=workspace.querySelector('[data-rider-availability]');
-    let online=null, savingAvailability=false, mapDialog=null, loadingHistory=false;
+    let online=null, savingAvailability=false, mapDialog=null, tripDialog=null, loadingHistory=false;
+    let tripEnabled=false, tripUnavailable=false, checkingTrip=false, firstMap=true;
+    let dispatch=null, acceptedTripId='';
     let offers=[], rows=[], view='', selectedId='', key='';
     let share=null, requesting=false, refreshing=false, mounted=true, savingOrder=null, jobsRevision=0;
     let completedId='', confirmedAction=null;
@@ -52,6 +54,8 @@
         ${disabled||savingOrder?'disabled':''}>${savingOrder===order.id?'Saving…':label}</button>`;
     const orderRef=order=>'Order #'+escape(String(order.id).slice(0,8));
     const statusLabel=order=>phaseLabel[order.status]||'Awaiting pickup';
+    const dropArea=order=>[order.delivery_pricing?.area,order.delivery_pricing?.barangay||order.barangay,'Alegria']
+      .filter(Boolean).join(', ');
     function deliveryPayout(order) {
       const q=order.delivery_pricing;
       if (!q) return order.delivery_fee == null ? '' :
@@ -68,15 +72,13 @@
         <header class="pr-trip-header"><h2 class="pr-job-alert">New job alert</h2><span class="pr-step">Step 1 of 3</span></header>
         <dl class="pr-trip-details pr-route-stops">
           <div><dt>Pick up at</dt><dd>${escape(order.store||'Store')}</dd><span class="pr-order-sub">${escape(order.store_address||'')}</span></div>
-          <div><dt>Drop-off area</dt><dd>${escape(order.delivery_pricing
-            ? order.delivery_pricing.area+', '+order.delivery_pricing.barangay+', Alegria'
-            : order.barangay?order.barangay+', Alegria':'Alegria')}</dd></div>
+          <div><dt>Drop-off area</dt><dd>${escape(dropArea(order))}</dd></div>
         </dl>
         ${deliveryPayout(order)}
         <p class="pr-status-note">${statusLabel(order)} · ${orderRef(order)}</p>
         <div class="pr-trip-actions">
           ${actionButton(order,'skip','Skip',{style:'s'})}
-          ${actionButton(order,'claim','Accept delivery')}
+          ${actionButton(order,tripEnabled?'offer':'claim',tripEnabled?'View offer':'Accept delivery')}
         </div>
       </article>`;
     }
@@ -91,7 +93,7 @@
         ? ' · '+orderTime.format(new Date(order.created_at)) : '';
       const sharing=share?.id===order.id;
       const phase=pickedUp?'On the way':accepted?'At the store':'Assigned to you';
-      const primary=pickedUp?actionButton(order,'deliver','Mark delivered',{style:'s',disabled:!handedOff})
+      const primary=tripEnabled?actionButton(order,'trip','Open trip'):pickedUp?actionButton(order,'deliver','Mark delivered',{style:'s',disabled:!handedOff})
         :accepted?actionButton(order,'pickup','Picked up & start delivery',{disabled:!handedOff})
         :actionButton(order,'accept','Accept assignment');
       return `<article class="pr-trip">
@@ -114,21 +116,21 @@
         ${cod}
         ${accepted&&!handedOff&&!pickedUp?'<p class="pr-status-note">Wait for the store to select <b>Hand to Rider</b>.</p>':''}
         <div class="pr-trip-actions pr-delivery-actions">
-          ${accepted?actionButton(order,'map','Navigate',{style:pickedUp?'p':'s'}):''}
+          ${accepted?actionButton(order,'map','Navigate',{style:tripEnabled?'s':pickedUp?'p':'s'}):''}
           ${primary}
         </div>
         <div class="pr-trip-tools">
           ${accepted?actionButton(order,'report','Report a problem',{style:'s'}):''}
           ${!pickedUp&&storePhone?`<a class="btn s" href="tel:${storePhone}">Call store</a>`:''}
           ${pickedUp&&phone?`<a class="btn s" href="sms:${phone}">Message customer</a><a class="btn s" href="tel:${phone}">Call customer</a>`:''}
-          ${pickedUp?(sharing?actionButton(order,'stop','Stop sharing GPS',{style:'s'}):
+          ${pickedUp&&!tripEnabled?(sharing?actionButton(order,'stop','Stop sharing GPS',{style:'s'}):
             actionButton(order,'gps',requesting?'Starting GPS…':'Share live GPS',{style:'s',disabled:requesting||!!share||!handedOff})):''}
           ${['confirmed','preparing','ready'].includes(order.status)?actionButton(order,'release','Release job',{style:'s'}):''}
         </div>
       </article>`;
     }
     function paint() {
-      const fingerprint=JSON.stringify([offers,rows,view,selectedId,[...skipped],share?.id,requesting,savingOrder,completedId,online,savingAvailability]);
+      const fingerprint=JSON.stringify([offers,rows,view,selectedId,[...skipped],share?.id,requesting,savingOrder,completedId,online,savingAvailability,tripEnabled]);
       if(key===fingerprint)return;
       key=fingerprint;
       const focused=workspace.contains(document.activeElement)?document.activeElement.dataset.deliveryAction:null;
@@ -159,6 +161,8 @@
           : visible.length?offerCard(visible[0])
           :`<section class="pr-no-deliveries"><h2>No available deliveries</h2><p>Deliveries appear here after the store confirms them.</p>
             ${offers.length?'<button type="button" class="btn s" data-delivery-action="unskip">Show skipped jobs</button>':''}</section>`;
+        if(tripEnabled&&!visible.length)list.insertAdjacentHTML('beforeend',
+          '<button type="button" class="btn s pr-reopen-map" data-delivery-action="dispatch">Open map</button>');
       } else if(active){
         const index=rows.indexOf(active);
         list.innerHTML=assignedCard(active)+(rows.length>1?`<div class="pr-jobs-nav">
@@ -250,6 +254,137 @@
       dialog.addEventListener('close',()=>{if(mapDialog?.dialog===dialog)mapDialog=null;},{once:true});
       if(window.PapalitaRiderMap)window.PapalitaRiderMap.mount(dialog,order,pickedUp);
       else dialog.querySelector('[data-map-status]').textContent='Street map is unavailable. Use the directions link.';
+    }
+
+    function openTrip(order){
+      if(tripDialog?.open||dispatch?.dialog.open)return;
+      const dialog=modal('Delivery trip',`
+        <div class="pr-trip-map" data-trip-map aria-label="Pickup and drop-off map"></div>
+        <p class="pr-trip-map-note" data-trip-map-note role="status"></p>
+        <p class="pr-trip-info" data-live-info role="status">Loading trip details…</p>
+        <div data-live-jobs></div>`);
+      dialog.classList.add('pr-trip-panel');
+      const controls=document.createElement('footer');
+      controls.className='pr-trip-controls';
+      controls.setAttribute('data-trip-controls','');
+      controls.hidden=true;
+      dialog.append(controls);
+      tripDialog=dialog;
+      dialog.addEventListener('close',()=>{
+        if(tripDialog===dialog)tripDialog=null;
+        if(alive())void refresh();
+      },{once:true});
+      window.PapalitaRiderTrip.open(dialog,db,alive,escape,order);
+    }
+
+    function updateDispatch() {
+      const panel=dispatch;
+      if(!panel?.dialog.open)return;
+      const offer=offers.find(order=>order.id===panel.offerId&&!skipped.has(order.id))
+        ||offers.find(order=>!skipped.has(order.id));
+      const currentId=offer?.id||'';
+      if(currentId!==panel.offerId){
+        panel.offerId=currentId;
+        panel.pins=null;
+        panel.loadingId='';
+        panel.info.textContent='';
+      }
+      const current=offer && {...panel.pins,...offer};
+      const signature=JSON.stringify([current,online,savingOrder,rows.length]);
+      if(signature===panel.signature)return;
+      panel.signature=signature;
+      const focusedAction=panel.footer.contains(document.activeElement)?document.activeElement.dataset.dispatch:null;
+      panel.map.show(current,'dispatch');
+      if(!current){
+        panel.sheet.innerHTML=`<div class="pr-dispatch-empty"><h3>${online?'No available deliveries':'You’re offline'}</h3>
+          <p>${online?'New offers appear here after a store confirms them.':'Open Available to go online and receive new offers.'}</p></div>`;
+        panel.footer.innerHTML='<button type="button" class="btn p blk" data-dispatch="back">View deliveries</button>';
+        return;
+      }
+      const q=current.delivery_pricing;
+      const roadMeters=q?.road_m;
+      const eta=Number.isFinite(roadMeters)&&roadMeters>0?Math.max(1,Math.ceil(roadMeters*60/25000)):null;
+      panel.sheet.innerHTML=`<div class="pr-dispatch-offer">
+        <div class="pr-trip-pay">${deliveryPayout(current)||'<span>Delivery payout unavailable</span>'}
+          <span>${eta?'Estimated drive · '+eta+' min at 25 km/h':'Travel time unavailable'} · ${orderRef(current)}</span></div>
+        <div class="pr-trip-stop"><span>P</span><div><small>Pickup</small><h3>${escape(current.store||'Store')}</h3><p>${escape(current.store_address||'')}</p></div></div>
+        <div class="pr-trip-stop"><span>D</span><div><small>Drop-off area</small><h3>${escape(dropArea(current))}</h3><p>Exact address available after acceptance.</p></div></div>
+      </div>`;
+      panel.footer.innerHTML=`<div class="pr-dispatch-actions">
+        <button type="button" class="btn s" data-dispatch="skip" ${savingOrder?'disabled':''}>Skip</button>
+        <button type="button" class="btn p" data-dispatch="accept" ${savingOrder?'disabled':''}>${savingOrder?'Accepting…':rows.length?'Add to trip':'Accept delivery'}</button>
+      </div>`;
+      if(focusedAction)panel.footer.querySelector('[data-dispatch="'+focusedAction+'"]:enabled')?.focus({preventScroll:true});
+      if(panel.loadingId!==current.id){
+        panel.loadingId=current.id;
+        void rpc('papalita_rider_trip_offers').then(items=>{
+          if(dispatch!==panel||!panel.dialog.open||panel.offerId!==current.id||!Array.isArray(items))return;
+          panel.pins=items.find(item=>item.id===current.id)||null;
+          updateDispatch();
+        }).catch(error=>{
+          if(dispatch===panel&&!['PGRST202','42883'].includes(error.code)){
+            panel.info.textContent='Offer map data could not load. The delivery details are still available.';
+          }
+        });
+      }
+    }
+
+    function openDispatch(offer) {
+      if(document.querySelector('.pr-dialog[open]'))return false;
+      const dialog=modal('Delivery map',`
+        <div class="pr-trip-map" data-trip-map aria-label="Delivery offer map"></div>
+        <p class="pr-trip-map-note" data-trip-map-note role="status"></p>
+        <p class="pr-trip-info" data-dispatch-info role="status"></p>
+        <div data-live-jobs></div>`);
+      dialog.classList.add('pr-trip-panel');
+      const footer=document.createElement('footer');
+      footer.className='pr-trip-controls';
+      dialog.append(footer);
+      const map=window.PapalitaRiderTripMap.create(dialog.querySelector('[data-trip-map]'),dialog.querySelector('[data-trip-map-note]'));
+      const info=dialog.querySelector('[data-dispatch-info]');
+      dispatch={dialog,map,footer,info,sheet:dialog.querySelector('[data-live-jobs]'),offerId:offer?.id||''};
+      const panel=dispatch;
+      dialog.addEventListener('close',()=>{
+        map.close();
+        if(dispatch===panel)dispatch=null;
+      },{once:true});
+      dialog.addEventListener('click',event=>{
+        const action=event.target.closest('[data-dispatch]')?.dataset.dispatch;
+        if(!action||savingOrder)return;
+        if(action==='back'){dialog.close();return;}
+        const order=offers.find(item=>item.id===panel.offerId);
+        if(!order)return;
+        if(action==='skip'){skipped.add(order.id);paint();updateDispatch();return;}
+        if(action==='accept'&&online===true&&!savingAvailability){
+          info.textContent='';
+          void save(order,'claim');
+        }
+      });
+      updateDispatch();
+      return true;
+    }
+
+    function openInitialMap() {
+      if(!firstMap||!tripEnabled||online===null||document.querySelector('.pr-dialog[open]'))return;
+      firstMap=false;
+      const order=rows.find(item=>item.rider_picked_up_at)||rows[0];
+      if(order){selectedId=order.id;view='my';paint();openTrip(order);}
+      else openDispatch();
+    }
+
+    async function checkTrip(){
+      if(tripEnabled||tripUnavailable||checkingTrip||!window.PapalitaRiderTrip?.open)return;
+      checkingTrip=true;
+      try{
+        if(Array.isArray(await rpc('papalita_rider_trip_orders'))&&alive()){
+          tripEnabled=true;
+          if(share)void end();
+          paint();
+          openInitialMap();
+        }
+      }catch(error){
+        tripUnavailable=['PGRST202','42883'].includes(error.code);
+      }finally{checkingTrip=false;}
     }
 
     async function showHistory(){
@@ -353,6 +488,7 @@
       ++jobsRevision;
       tell('');
       paint();
+      updateDispatch();
       try{
         if(action==='claim'){
           const version=await rpc('papalita_rider_claim',{p_order_id:order.id});
@@ -363,6 +499,10 @@
           selectedId=order.id;
           completedId='';
           tell('Delivery accepted.');
+          if(tripEnabled){
+            acceptedTripId=order.id;
+            if(dispatch?.dialog.open)dispatch.dialog.close();
+          }
         }else if(action==='accept'||action==='pickup'){
           const progress=await rpc('papalita_tracking_rider_progress',{
             p_order_id:order.id,p_assignment_version:order.assignment_version,p_action:action
@@ -385,10 +525,13 @@
           tell(action==='deliver'?'Order marked delivered.':'Job released back to Available Deliveries.');
         }
       }catch(error){
-        if(alive())tell(error.message);
+        if(alive()){
+          tell(error.message);
+          if(action==='claim'&&dispatch?.dialog.open)dispatch.info.textContent=error.message;
+        }
       }finally{
         savingOrder=null;
-        if(alive()){paint();void refresh();}
+        if(alive()){paint();updateDispatch();void refresh();}
       }
     }
     async function refresh() {
@@ -413,6 +556,16 @@
         }
         loadStatus.textContent='';
         paint();
+        updateDispatch();
+        if(acceptedTripId){
+          const accepted=rows.find(row=>row.id===acceptedTripId);
+          if(accepted&&!document.querySelector('.pr-dialog[open]')){
+            acceptedTripId='';
+            openTrip(accepted);
+          }
+        }
+        if(tripEnabled)openInitialMap();
+        else void checkTrip();
       } catch(error) {
         if(alive()&&revision===jobsRevision){
           const code=/^[A-Z0-9]{5,10}$/.test(error.code||'')?error.code:'';
@@ -452,12 +605,15 @@
       if(action==='unskip'){skipped.clear();paint();return;}
       if(action==='skip'){skipped.add(id);paint();return;}
       if(savingOrder)return;
+      if(action==='dispatch'&&tripEnabled){openDispatch();return;}
       if(action==='stop'){void end();return;}
       if(action==='gps'){void start(id);return;}
-      const order=(action==='claim'?offers:rows).find(row=>row.id===id);
+      const order=(['claim','offer'].includes(action)?offers:rows).find(row=>row.id===id);
       if(!order)return;
+      if(action==='offer'&&tripEnabled){openDispatch(order);return;}
       if(action==='report'){reportProblem(order);return;}
       if(action==='map'){openStreetMap(order);return;}
+      if(action==='trip'&&tripEnabled){openTrip(order);return;}
       if(action==='claim'&&(online!==true||savingAvailability))return;
       if(action==='deliver'||action==='release'){
         if(!confirmedAction?.open)confirmAction(order,action);
@@ -491,6 +647,9 @@
       window.removeEventListener('pagehide',leaving);
       workspace.removeEventListener('click',click);
       if(confirmedAction?.open)confirmedAction.close();
+      if(dispatch?.dialog.open)dispatch.dialog.close();
+      if(tripDialog?.open)tripDialog.close();
+      if(mapDialog?.dialog.open)mapDialog.dialog.close();
       refreshButton.removeEventListener('click',refreshView);
       availability.removeEventListener('change',setAvailability);
       void end();

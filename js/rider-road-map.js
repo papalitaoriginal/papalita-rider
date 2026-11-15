@@ -140,5 +140,5 @@
     return close;
   }
 
-  window.PapalitaRiderMap={mount};
+  window.PapalitaRiderMap={mount,leaflet};
 })();
