@@ -51,6 +51,45 @@
     let order=assignedOrder, painted='', share=null, refreshing=false, busy=false, loaded=false;
     let form='', photo='', photoLoading=false, revision=0, mutation=0, gpsWatch, reportId;
     const alive=()=>dialog.open && dialog.isConnected && isCurrent();
+    const gcash=document.createElement('details');
+    gcash.className='pr-trip-gcash';
+    gcash.innerHTML=`<summary>Show GCash QR</summary>
+      <div class="pr-trip-gcash-body">
+        <p>Ask the customer to pay <strong data-gcash-amount></strong>.</p>
+        <p data-gcash-status role="status"></p>
+        <img data-gcash-image alt="Papalita GCash payment QR" hidden>
+        <p>Wait for Papalita to verify the payment before completing delivery.</p>
+      </div>`;
+    const gcashAmount=gcash.querySelector('[data-gcash-amount]');
+    const gcashStatus=gcash.querySelector('[data-gcash-status]');
+    const gcashImage=gcash.querySelector('[data-gcash-image]');
+    let gcashUrl='',loadingGcash=false;
+    function clearGcashImage() {
+      if(gcashUrl)URL.revokeObjectURL(gcashUrl);
+      gcashUrl='';
+      gcashImage.removeAttribute('src');
+      gcashImage.hidden=true;
+    }
+    gcashImage.addEventListener('error',()=>{
+      clearGcashImage();
+      gcashStatus.textContent='GCash QR could not be displayed. Contact Papalita support.';
+    });
+    gcash.addEventListener('toggle',async()=>{
+      if(!gcash.open||!gcash.isConnected||!alive()||loadingGcash||gcashUrl)return;
+      loadingGcash=true;
+      gcashStatus.textContent='Loading GCash QR…';
+      try {
+        const {data,error}=await db.storage.from('papalita-rider-payments').download('gcash-qr.png');
+        if(!gcash.isConnected||!alive())return;
+        if(error||!data?.size||data.type!=='image/png')throw Error('QR not available');
+        gcashUrl=URL.createObjectURL(data);
+        gcashImage.src=gcashUrl;
+        gcashImage.hidden=false;
+        gcashStatus.textContent='';
+      } catch {
+        if(gcash.isConnected&&alive())gcashStatus.textContent='GCash QR is unavailable. Contact Papalita support.';
+      } finally {loadingGcash=false;}
+    });
     const tell=message=>{info.textContent=message;info.hidden=!message;};
     const rpc=async(name,args)=>{
       const {data,error}=await db.rpc(name,args);
@@ -74,6 +113,7 @@
       const payout=Number.isFinite(q?.total_centavos)?money(q.total_centavos/100):
         o?.delivery_fee!=null&&Number.isFinite(Number(o.delivery_fee))?money(Number(o.delivery_fee)):'Unavailable';
       const due=o?.payment_method==='cod'&&!['paid','refunded'].includes(o.payment_status)&&o.total_amount!=null&&Number.isFinite(Number(o.total_amount));
+      const showGcash=due&&o.payment_status==='unpaid'&&o.status==='out_for_delivery'&&loaded&&step==='arrived'&&Number(o.total_amount)>0;
       const customerPhone=String(o?.contact_number||'').replace(/[^0-9+]/g,'');
       const storeCoords=[o?.pickup_lat??o?.store_lat,o?.pickup_lng??o?.store_lng];
       const hasPhoto=form==='pickup-photo'||form==='proof';
@@ -82,7 +122,8 @@
       const focus=list.contains(document.activeElement)?document.activeElement.getAttribute('data-trip-action'):null;
       list.innerHTML=o?`<section aria-label="Order ${esc(o.id.slice(0,8))}">
         ${step==='delivered'?'<p role="status">Delivery completed. See Earnings for your delivery history.</p>':''}
-        <div class="pr-trip-pay"><span>${due&&step==='arrived'?'Cash to collect':'Delivery payout'}</span><strong>${due&&step==='arrived'?money(Number(o.total_amount)):payout}</strong><span>Order #${esc(o.id.slice(0,8))}</span></div>
+        <div class="pr-trip-pay"><span>${due&&step==='arrived'?(showGcash?'Amount due':'Cash to collect'):'Delivery payout'}</span><strong>${due&&step==='arrived'?money(Number(o.total_amount)):payout}</strong><span>Order #${esc(o.id.slice(0,8))}</span></div>
+        ${showGcash?'<div data-gcash-slot></div>':''}
         ${stop('Pickup',o.store||'Store',o.store_address||'Pickup address unavailable',directions([o.store,o.store_address].filter(Boolean).join(', '),...storeCoords),o.pickup_eta_minutes)}
         ${stop('Drop-off',step==='offer'?'Customer drop-off':o.customer_name||'Customer drop-off',address(o.address)||'Drop-off address unavailable',directions(address(o.address),o.drop_lat,o.drop_lng),o.drop_eta_minutes)}
         ${step!=='offer'&&customerPhone?`<div class="pr-trip-links"><a href="tel:${esc(customerPhone)}">Call customer</a><a href="sms:${esc(customerPhone)}">Text customer</a></div>`:''}
@@ -96,6 +137,13 @@
           ${form==='finish'?`<form aria-label="Confirm drop-off">${due?`<label><input type="checkbox" name="cash" required> I collected ${money(Number(o.total_amount))} in cash.</label>`:'<p>Confirm that the order reached the customer.</p>'}<button class="btn p" ${busy?'disabled':''}>Complete delivery</button></form>`:''}
         </div>
       </section>`:'<p>This delivery is no longer assigned to you.</p>';
+      if(showGcash){
+        gcashAmount.textContent=money(Number(o.total_amount));
+        list.querySelector('[data-gcash-slot]').replaceWith(gcash);
+      }else if(gcash.open||gcashUrl){
+        gcash.open=false;
+        clearGcashImage();
+      }
       footer.innerHTML=o&&step!=='delivered'?`
         ${step==='store'&&o.status!=='out_for_delivery'?'<p>Wait for the store to select Hand to Rider.</p>':''}
         ${step==='arrived'&&!o.trip_proof?'<p>Add proof of delivery to continue.</p>':''}
@@ -268,6 +316,7 @@
     const poll=setInterval(refresh,5000);
     dialog.addEventListener('close',()=>{
       clearInterval(poll);
+      clearGcashImage();
       if(gpsWatch!=null)navigator.geolocation.clearWatch(gpsWatch);
       map.close();
       document.removeEventListener('visibilitychange',visibility);
