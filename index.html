@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Papalita Rider</title><meta name="robots" content="noindex"><meta name="theme-color" content="#087F32">
+<link rel="stylesheet" href="./rider-trip.css?v=20261115-map-first">
 <link rel="manifest" href="./rider.webmanifest?v=4">
 <link rel="apple-touch-icon" href="./images/papalita-rider-icon-192.png">
 <link rel="icon" href="./images/papalita-rider-icon-192.png" type="image/png">
@@ -337,7 +338,10 @@ html[data-pr-theme=dark]{--pr-bg:#121a15;--pr-card:#1c271f;--pr-ink:#edf0e7;--pr
 </head>
 <body><div id="root"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/config.js"></script><script src="js/ops.js"></script><script src="js/rider-road-map.js"></script><script src="js/live-delivery-rider.js?update=delivery-quotes-1"></script>
+<script src="js/config.js"></script><script src="js/ops.js"></script><script src="js/rider-road-map.js?v=20261115-map-first"></script>
+<script src="js/rider-trip-map.js?v=20261115-map-first"></script>
+<script src="js/rider-trip.js?v=20261115-map-first"></script>
+<script src="js/live-delivery-rider.js?v=20261115-map-first"></script>
 <script>
 (() => { 'use strict';
 /* Rider identity is verified by Supabase Auth and the protected user_roles table. */
@@ -591,7 +595,7 @@ function prRiderGate(message=''){
         <img src="images/papalita_mark_color.png" alt="" width="44" height="44">
         <div><strong>Papalita</strong><small>Rider Portal</small></div>
       </div>
-      <a class="pr-entry-back" href="https://tomcaberio99-design.github.io/papalita/">${prIcon('arrow')} Customer app</a>
+      <a class="pr-entry-back" href="https://papalitaoriginal.github.io/papalita/">${prIcon('arrow')} Customer app</a>
     </header>
     <main class="pr-entry-main">
       <section class="pr-entry-access" aria-labelledby="rider-signin-title">
