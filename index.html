@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Papalita Rider</title><meta name="robots" content="noindex"><meta name="theme-color" content="#087F32">
-<link rel="stylesheet" href="./rider-trip.css?v=20261115-map-first">
+<link rel="stylesheet" href="./rider-trip.css?v=20261115-google-maps">
 <link rel="manifest" href="./rider.webmanifest?v=4">
 <link rel="apple-touch-icon" href="./images/papalita-rider-icon-192.png">
 <link rel="icon" href="./images/papalita-rider-icon-192.png" type="image/png">
@@ -106,7 +106,7 @@ html[data-pr-theme=dark]{--pr-bg:#121a15;--pr-card:#1c271f;--pr-ink:#edf0e7;--pr
 .pr-form-message{color:var(--pr-muted);margin:8px 0}
 .pr-trip-tools{overflow-wrap:anywhere}
 .pr-map-canvas{height:clamp(220px,40dvh,360px);background:#e2eee3;border-radius:12px;isolation:isolate}
-.pr-map-pin{display:grid;place-items:center;border-radius:50%;border:2px solid white;color:white;font-weight:800;background:#14633e}
+.pr-map-pin{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;border:2px solid white;color:white;font-weight:800;background:#14633e}
 .pr-map-drop{background:#a46017}
 .pr-map-rider{background:#087f45}
 .pr-map-rider svg{width:18px;fill:none;stroke:white;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -338,10 +338,13 @@ html[data-pr-theme=dark]{--pr-bg:#121a15;--pr-card:#1c271f;--pr-ink:#edf0e7;--pr
 </head>
 <body><div id="root"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/config.js"></script><script src="js/ops.js"></script><script src="js/rider-road-map.js?v=20261115-map-first"></script>
-<script src="js/rider-trip-map.js?v=20261115-map-first"></script>
-<script src="js/rider-trip.js?v=20261115-map-first"></script>
-<script src="js/live-delivery-rider.js?v=20261115-map-first"></script>
+<script src="js/config.js"></script><script src="js/ops.js"></script>
+<script src="js/rider-maps-config.js?v=20261115-google-maps"></script>
+<script src="js/rider-google-map.js?v=20261115-google-maps"></script>
+<script src="js/rider-road-map.js?v=20261115-google-maps"></script>
+<script src="js/rider-trip-map.js?v=20261115-google-maps"></script>
+<script src="js/rider-trip.js?v=20261115-google-maps"></script>
+<script src="js/live-delivery-rider.js?v=20261115-google-maps"></script>
 <script>
 (() => { 'use strict';
 /* Rider identity is verified by Supabase Auth and the protected user_roles table. */
@@ -514,7 +517,7 @@ function draw(){
       <button class="btn d blk" type="button" data-pr-signout>${prIcon('logout')}Sign out</button>
      </div>
     </div>
-    <footer class="pr-account-version">Papalita Rider · Version 1.0</footer>
+    <footer class="pr-account-version">Papalita Rider · Version 1.0<br><a href="./map-terms.html" class="pr-maps-policy">Map terms and privacy</a></footer>
    </section>
   </main>
   <nav class="pr-nav" aria-label="Rider navigation"><div class="pr-nav-inner">
@@ -626,6 +629,7 @@ function prRiderGate(message=''){
           <p class="pr-install-pending" role="status">Install Rider App will appear when Chrome is ready.</p>
         </form>
         <p class="pr-auth-access">Your account needs the <b>rider</b> role. Contact your Papalita administrator if you need access.</p>
+        <p class="pr-auth-access"><a href="./map-terms.html" class="pr-maps-policy">Map terms and privacy</a></p>
       </section>
       <section class="pr-entry-intro" aria-labelledby="rider-entry-title">
         <span class="pr-entry-eyebrow">For riders in Alegria</span>
