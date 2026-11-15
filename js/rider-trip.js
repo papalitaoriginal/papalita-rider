@@ -57,18 +57,41 @@
       <div class="pr-trip-gcash-body">
         <p>Ask the customer to pay <strong data-gcash-amount></strong>.</p>
         <p data-gcash-status role="status"></p>
-        <img data-gcash-image alt="Papalita GCash payment QR" hidden>
-        <p>Wait for Papalita to verify the payment before completing delivery.</p>
+        <div class="pr-trip-gcash-frame" hidden>
+          <img data-gcash-image alt="Papalita GCash payment QR">
+        </div>
+        <button type="button" class="btn s" data-gcash-view hidden>Show full GCash card</button>
+        <p>Check that the customer has sent the amount, then request verification.</p>
+        <button type="button" class="btn p" data-trip-action="verify-gcash" disabled>Request GCash verification</button>
       </div>`;
     const gcashAmount=gcash.querySelector('[data-gcash-amount]');
     const gcashStatus=gcash.querySelector('[data-gcash-status]');
     const gcashImage=gcash.querySelector('[data-gcash-image]');
+    const gcashFrame=gcashImage.parentElement;
+    const gcashView=gcash.querySelector('[data-gcash-view]');
+    const requestGcash=gcash.querySelector('[data-trip-action="verify-gcash"]');
     let gcashUrl='',loadingGcash=false;
+    function focusGcashCode(focused) {
+      gcashFrame.classList.toggle('is-focused',focused);
+      gcashView.textContent=focused?'Show full GCash card':'Enlarge QR code';
+    }
+    gcashView.addEventListener('click',()=>focusGcashCode(!gcashFrame.classList.contains('is-focused')));
+    gcashImage.addEventListener('load',()=>{
+      // The supplied GCash card has a large border around the scan area.
+      const canFocus=gcashImage.naturalWidth===781&&gcashImage.naturalHeight===1536;
+      focusGcashCode(canFocus);
+      gcashFrame.hidden=false;
+      gcashView.hidden=!canFocus;
+      requestGcash.disabled=busy;
+      gcashStatus.textContent='';
+    });
     function clearGcashImage() {
       if(gcashUrl)URL.revokeObjectURL(gcashUrl);
       gcashUrl='';
       gcashImage.removeAttribute('src');
-      gcashImage.hidden=true;
+      gcashFrame.hidden=true;
+      gcashView.hidden=true;
+      requestGcash.disabled=true;
     }
     gcashImage.addEventListener('error',()=>{
       clearGcashImage();
@@ -84,8 +107,6 @@
         if(error||!data?.size||data.type!=='image/png')throw Error('QR not available');
         gcashUrl=URL.createObjectURL(data);
         gcashImage.src=gcashUrl;
-        gcashImage.hidden=false;
-        gcashStatus.textContent='';
       } catch {
         if(gcash.isConnected&&alive())gcashStatus.textContent='GCash QR is unavailable. Contact Papalita support.';
       } finally {loadingGcash=false;}
@@ -113,7 +134,8 @@
       const payout=Number.isFinite(q?.total_centavos)?money(q.total_centavos/100):
         o?.delivery_fee!=null&&Number.isFinite(Number(o.delivery_fee))?money(Number(o.delivery_fee)):'Unavailable';
       const due=o?.payment_method==='cod'&&!['paid','refunded'].includes(o.payment_status)&&o.total_amount!=null&&Number.isFinite(Number(o.total_amount));
-      const showGcash=due&&o.payment_status==='unpaid'&&o.status==='out_for_delivery'&&loaded&&step==='arrived'&&Number(o.total_amount)>0;
+      const waitingForGcash=o?.cod_payment_state==='gcash_pending';
+      const showGcash=due&&!waitingForGcash&&o.payment_status==='unpaid'&&o.status==='out_for_delivery'&&loaded&&step==='arrived'&&Number(o.total_amount)>0;
       const customerPhone=String(o?.contact_number||'').replace(/[^0-9+]/g,'');
       const storeCoords=[o?.pickup_lat??o?.store_lat,o?.pickup_lng??o?.store_lng];
       const hasPhoto=form==='pickup-photo'||form==='proof';
@@ -123,6 +145,9 @@
       list.innerHTML=o?`<section aria-label="Order ${esc(o.id.slice(0,8))}">
         ${step==='delivered'?'<p role="status">Delivery completed. See Earnings for your delivery history.</p>':''}
         <div class="pr-trip-pay"><span>${due&&step==='arrived'?(showGcash?'Amount due':'Cash to collect'):'Delivery payout'}</span><strong>${due&&step==='arrived'?money(Number(o.total_amount)):payout}</strong><span>Order #${esc(o.id.slice(0,8))}</span></div>
+        ${waitingForGcash?'<p class="pr-trip-gcash-state" role="status">GCash payment awaiting Papalita verification.</p>':''}
+        ${step==='arrived'&&o.cod_payment_state==='gcash_verified'?'<p class="pr-trip-gcash-state" role="status">GCash payment verified by Papalita.</p>':''}
+        ${step==='arrived'&&o.cod_payment_state==='gcash_cancelled'?'<p class="pr-trip-gcash-state" role="status">Papalita closed the GCash request. Ask the customer how they want to pay.</p>':''}
         ${showGcash?'<div data-gcash-slot></div>':''}
         ${stop('Pickup',o.store||'Store',o.store_address||'Pickup address unavailable',directions([o.store,o.store_address].filter(Boolean).join(', '),...storeCoords),o.pickup_eta_minutes)}
         ${stop('Drop-off',step==='offer'?'Customer drop-off':o.customer_name||'Customer drop-off',address(o.address)||'Drop-off address unavailable',directions(address(o.address),o.drop_lat,o.drop_lng),o.drop_eta_minutes)}
@@ -134,12 +159,13 @@
           ${step==='arrived'?`<button type="button" class="btn s" data-trip-action="proof" ${busy?'disabled':''}>${o.trip_proof?'Replace proof photo':'Add proof photo'}</button>`:''}
           ${form==='report'?`<form aria-label="Report delivery issue"><label>Reason <select name="reason" class="pr-trip-select">${reasons.map(([value,name])=>`<option value="${value}" ${value===reportReason?'selected':''}>${name}</option>`).join('')}</select></label><label>Note (optional)<textarea name="note" maxlength="240"></textarea></label><button class="btn p" ${busy?'disabled':''}>Send report</button></form>`:''}
           ${hasPhoto?`<form aria-label="Attach delivery photo"><label>Delivery photo<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" ${busy?'disabled':''}></label>${photo?`<img class="pr-trip-photo" alt="Photo preview" src="data:image/jpeg;base64,${photo}">`:''}<button class="btn p" ${!photo||photoLoading||busy?'disabled':''}>Save photo</button></form>`:''}
-          ${form==='finish'?`<form aria-label="Confirm drop-off">${due?`<label><input type="checkbox" name="cash" required> I collected ${money(Number(o.total_amount))} in cash.</label>`:'<p>Confirm that the order reached the customer.</p>'}<button class="btn p" ${busy?'disabled':''}>Complete delivery</button></form>`:''}
+          ${form==='finish'&&!waitingForGcash?`<form aria-label="Confirm drop-off">${due?`<label><input type="checkbox" name="cash" required> I collected ${money(Number(o.total_amount))} in cash.</label>`:'<p>Confirm that the order reached the customer.</p>'}<button class="btn p" ${busy?'disabled':''}>Complete delivery</button></form>`:''}
         </div>
       </section>`:'<p>This delivery is no longer assigned to you.</p>';
       if(showGcash){
         gcashAmount.textContent=money(Number(o.total_amount));
         list.querySelector('[data-gcash-slot]').replaceWith(gcash);
+        requestGcash.disabled=busy||gcashFrame.hidden;
       }else if(gcash.open||gcashUrl){
         gcash.open=false;
         clearGcashImage();
@@ -147,7 +173,7 @@
       footer.innerHTML=o&&step!=='delivered'?`
         ${step==='store'&&o.status!=='out_for_delivery'?'<p>Wait for the store to select Hand to Rider.</p>':''}
         ${step==='arrived'&&!o.trip_proof?'<p>Add proof of delivery to continue.</p>':''}
-        <button type="button" class="btn p blk" data-trip-action="next" ${!loaded||busy||
+        <button type="button" class="btn p blk" data-trip-action="next" ${!loaded||busy||waitingForGcash||
           (step==='store'&&o.status!=='out_for_delivery')||(step==='arrived'&&!o.trip_proof)?'disabled':''}>${labels[step]}</button>`:'';
       footer.hidden=!o||step==='delivered';
       const note=list.querySelector('textarea');
@@ -260,6 +286,10 @@
       if(!action||busy||!loaded||!order)return;
       const o=order;
       if(action==='gps'){void (share?.id===o.id?stopShare('GPS sharing stopped.'):startShare(o));return;}
+      if(action==='verify-gcash'){
+        void send('request_gcash_verification',{},'GCash verification requested. Papalita has been notified.');
+        return;
+      }
       if(action==='next'){
         const step=phase(o);
         if(step==='arrived'){clearForm();form='finish';paint();list.querySelector('form')?.scrollIntoView({block:'nearest'});return;}
